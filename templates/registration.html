@@ -1,0 +1,9 @@
+<h1>Реєстрація </h1>
+<form>
+	{% csrf_token %}
+	<input name="log"></input><br>
+	<input name="pass1"></input><br>
+	<input name="pass2"></input><br>
+
+	<button type="submit" formmethod="post" name="Registration">Зареєструватись</button><br>
+</form>
