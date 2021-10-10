@@ -5,10 +5,19 @@
     <title>Title</title>
 </head>
 <body>
-<form>
+
+
+<form action="{% url 'registration' %}">
     {% csrf_token %}
-    <button type="submit" formmethod="post" name="Registration">Зареєструватися</button><br>
-    <button type="submit" formmethod="post" name="Authentication">Увійти</button>
+    <button>Зареєструватися</button><br>
 </form>
+
+
+<form action="{% url 'authentication' %}">
+    {% csrf_token %}
+    <button>Увійти</button>
+</form>
+
+
 </body>
 </html>

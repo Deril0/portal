@@ -3,14 +3,12 @@ from django.shortcuts import redirect, render
 import json
 
 
+# Початкова сторінка
 def main(request):
-    if 'Registration' in request.POST:
-        return redirect("registration/")
-    elif 'Authentication' in request.POST:
-        return redirect("authentication/")
     return render(request, 'main.html')
 
 
+# Процес реєстрації
 def registration(request):
     if 'Registration' in request.POST:
         login = request.POST['log']
@@ -38,6 +36,7 @@ def registration(request):
     return render(request, 'registration.html')
 
 
+# Процес аутентифікації
 def authentication(request):
     if 'Authentication' in request.POST:
         login = request.POST['log']
@@ -45,19 +44,18 @@ def authentication(request):
         with open("portal/log_sign.json", "r") as my_file:
             signer_json = my_file.read()
         signer = json.loads(signer_json)
-        if "user_" + login in [key for key in signer['REGISTER']['LOGIN_INFO'].keys()] and signer['REGISTER']['LOGIN_INFO']["user_" + login] == {login: passname}:
-            return render(request, 'index.html')
+        if "user_" + login in [key for key in signer['REGISTER']['LOGIN_INFO'].keys()] and \
+                signer['REGISTER']['LOGIN_INFO']["user_" + login] == {login: passname}:
+            context = {
+                "login": login[0].upper()+login[1:],
+            }
+            return render(request, 'index.html',context=context)
         else:
             return HttpResponse("Щось пішло не так :( (Неправильний логін або пароль)")
-
-
-
         # return redirect('main/')
     return render(request, 'authentication.html')
 
+
+# Головна сторінка
 def index(request):
     return render(request, 'index.html')
-
-
-
-
