@@ -1,0 +1,295 @@
+filter {
+
+    mutate {
+        add_field => {"[event][module]" => "kerioconnect"}
+        add_field => {"[event][kind]" => "event"}
+        add_field => {"[observer][type]" => "mail"}
+        remove_field => ["[host]"]
+    }
+
+    grok {
+        match => {
+            'message' => [
+                '<%{NUMBER:[log][syslog][priority]}>%{NUMBER} %{TIMESTAMP_ISO8601:time} %{NOTSPACE:[observer][hostname]} %{NOTSPACE:[observer][name]} - - - ï»¿ %{NOTSPACE:[server][name]}\/%{NOTSPACE:[event][dataset]}:(\s+|)%{GREEDYDATA:[event][message]}',
+                '<%{NUMBER:[log][syslog][priority]}>%{NUMBER} %{TIMESTAMP_ISO8601:time} %{NOTSPACE:[observer][hostname]} %{NOTSPACE:[observer][name]} - - - ï»¿ (?<[email][direction]>Recv|Sent):(\s+|)%{GREEDYDATA:[event][message]}',
+                '<%{NUMBER:[log][syslog][priority]}>%{NUMBER} %{TIMESTAMP_ISO8601:time} %{NOTSPACE:[observer][hostname]} %{NOTSPACE:[observer][name]} - - - ï»¿ %{NOTSPACE:[server][name]}:(\s+|)%{GREEDYDATA:[event][message]}',
+                '<%{NUMBER:[log][syslog][priority]}>%{NUMBER} %{TIMESTAMP_ISO8601:time} %{NOTSPACE:[observer][hostname]} %{NOTSPACE:[observer][name]} - - - ï»¿(\s+|)%{GREEDYDATA:[event][message]}'
+            ]
+        }
+        tag_on_failure => ['_grok_general_unmatch', '_failure']
+    }
+
+    if [server][name] {
+        grok {
+            match => {
+                '[event][message]' => [
+                    # <22>1 2021-12-21T12:56:14+01:00 mail.mmn.lan mail-kerio-connect - - - ï»¿ IMAP: User pratiche-finanziarie@magneticmedia.com authenticated  from IP address 192.168.250.10; Mac OS X Mail 11.5 (3445.9.7) / Mac OS X 10.13.6 (17G14042)
+                    'User %{NOTSPACE:[user][email]} %{WORD:[event][action]}  from IP address %{IP:[source][ip]}(; %{GREEDYDATA:[user_agent][original]})?',
+                    # <189>1 2021-12-20T18:03:51+01:00 mail.mmn.lan mail-kerio-connect - - - ï»¿ SMTP: User diana.pascu@cmalex.it doesn't exist. Attempt from IP address 84.10.231.220.
+                    '(?<error_message_1>User) %{NOTSPACE:[user][email]} %{DATA:error_message_2}\. %{DATA:[event][detail]} %{IP:[source][ip]}\.',
+                    # <21>1 2021-12-20T18:03:50+01:00 mail4 mail4 - - - ï»¿ SMTP: Authentication attempt from host 87.246.7.229 denied, insecure authentication not allowed.
+                    '(?<error_message_1>%{DATA} host) %{NOTSPACE:[host][ip]} (?<[event][action]>%{WORD:error_message_2}), %{GREEDYDATA:[event][detail]}\.',
+                    # <21>1 2021-12-22T09:17:02+01:00 mail4 mail4 - - - ï»¿ POP3: AntiHammering - IP address 2.116.11.22 will be blocked for 5 minutes, too many failed logins from this IP address.
+                    '(?<[event][provider]>AntiHammering) - %{DATA:event_detail_1} %{IP:[source][ip]} (?<event_detail_2>will be %{WORD:[event][action]} %{DATA}), %{GREEDYDATA:[error][message]}\.',
+                    # <21>1 2021-12-20T18:05:47+01:00 mail4 mail4 - - - ï»¿ POP3: AntiHammering: connection from IP address 2.116.11.22 is blocked
+                    '(?<[event][provider]>AntiHammering): %{DATA:error_message_1} %{IP:[source][ip]} (?<error_message_2>is %{GREEDYDATA:[event][action]})',
+                    # <19>1 2021-12-20T18:03:22+01:00 mail.mmn.lan mail-kerio-connect - - - ï»¿ ItemIdHelper.cpp: <Unknown user> - <Unknown request>: Unimplemented: createItemIdFrom
+                    '(?<[event][detail]><Unknown user> - <Unknown request>: Unimplemented: createItemIdFrom)',
+                    # <19>1 2021-12-20T18:14:51+01:00 mail.mmn.lan mail-kerio-connect - - - ï»¿ MailData.cpp: MailData::SetContentPropertyStreamed: No preferred body type. [User: m.vavassori@magneticmedia.com, Device: (KLLOB8TKDT6O73UVP1CCO1ATIS, iPhone, Apple-iPhone12C3/1903.56), IP address: 192.168.250.8]
+                    '%{NOTSPACE:[event][provider]}::%{NOTSPACE:[rule][name]}: %{DATA:[error][message]}\. \[User: %{NOTSPACE:[user][email]}, Device: \(%{DATA:[user_agent][original]}\), IP address: %{IP:[source][ip]}\]',
+                    # <19>1 2021-12-20T20:11:52+01:00 mail.mmn.lan mail-kerio-connect - - - ï»¿ Ids.cpp: Item ID "7:4806<!ExceptionDate!>20010101T000000Z" is in incompatible format. [User: a.poloni@magneticmedia.com, Device: (E8AJ6TSB7L1GNBFU4VD3DEON10, iPhone, Apple-iPhone14C3/1903.57), IP address: 2.58.139.50]
+                    '(?<error_message_1>%{DATA}) \"%{DATA}\" %{DATA:error_message_2}\. \[User: %{NOTSPACE:[user][email]}, Device: \(%{DATA:[user_agent][original]}\), IP address: %{IP:[source][ip]}\]',
+                    # <19>1 2021-12-22T09:11:22+01:00 mail4 mail4 - - - ï»¿ Request.cpp: Failed to read ActiveSync request data from the client (Content-Length header: 107, Available data: 0). [User: r.franchini@labelgroup.com, Device: (ON5KVVJCAH0239AI93OTLECCGO, iPhone, Apple-iPhone12C5/1902.74), IP address: 151.36.40.78]
+                    '%{DATA:[error][message]} \(%{DATA}\)\. \[User: %{NOTSPACE:[user][email]}, Device: \(%{DATA:[user_agent][original]}\), IP address: %{IP:[source][ip]}\]',
+                    # <21>1 2021-12-20T22:05:48+01:00 mail4 mail4 - - - ï»¿ SMTP: Message from authenticated user: <t.ronchetti@studiobellipaci.it> was rejected, because sender identity was detected as spoofed. (Source IP address: 93.43.118.9, From header: <backup@studiobellipaci.it>, Sender header: <>)
+                    '(?<error_message_1>%{DATA}): <%{NOTSPACE:[source][user][email]}> (?<error_message_2>was %{WORD:[event][action]}), because %{DATA:[event][reason]}\. \(Source IP address: %{IP:[source][ip]}, From header: <%{NOTSPACE:[email][from][address]}>, Sender header: <%{DATA}>\)',
+                    # <21>1 2021-12-21T05:08:50+01:00 mail4 mail4 - - - ï»¿ SMTP: Message from IP address 103.90.46.27 was rejected because of missing authentication for local domain sender <redazione@dairypress.com>.
+                    '(?<error_message_1>%{DATA}) %{IP:[source][ip]} (?<error_message_2>was %{WORD:[event][action]}) because of %{DATA:[event][reason]} <%{DATA:[source][user][email]}>',
+                    # <189>1 2021-12-20T18:22:05+01:00 mail.mmn.lan mail-kerio-connect - - - ï»¿ HTTP/ActiveSync: Invalid password for user d.gaspani@magneticmedia.com. Attempt from IP address 185.30.177.240.
+                    '(?<[error][message]>%{DATA}user) %{NOTSPACE:[user][email]}\. %{DATA:[event][detail]} %{IP:[source][ip]}',
+                    # <19>1 2021-12-20T18:04:37+01:00 mail4 mail4 - - - ï»¿ mail_pop3c.cpp: Cannot connect to POP3 server 37.9.224.2:110.
+                    '(?<error_message_1>%{DATA}to) %{NOTSPACE} (?<error_message_2>server) %{NOTSPACE:[server][address]}:%{NUMBER:[server][port]}(, %{DATA:[event][detail]}\.)?',
+                    # <19>1 2021-12-21T09:35:37+01:00 mail4 mail4 - - - ï»¿ SyncCommandHelpers.cpp: Unable to parse request from mobile device. Unable to get folder ID for class: N/A. [User: francesco.castellano@agentinestle.it, Device: (BRVQG0R5297O51VE2H9VBRHGAO, iPad, Apple-iPad6C12/1902.74), IP address: 79.45.229.229]
+                    '%{DATA:[error][message]}\. %{DATA:[event][detail]}: N/A\. \[User: %{NOTSPACE:[user][email]}, Device: \(%{DATA:[user_agent][original]}\), IP address: %{IP:[source][ip]}\]',
+                    # <19>1 2021-12-20T18:03:22+01:00 mail.mmn.lan mail-kerio-connect - - - ï»¿ EwsOperation.cpp: EWS request GetItem: internal server error occurred; description: InternalException thrown by 'createItemIdFrom': 'Unexpected condition occurred.'  (0x00000000)
+                    '%{DATA}: %{DATA:[error][message]}; description: %{DATA:[event][detail]}  \(%{NOTSPACE:[error][code]}\)',
+                    # <21>1 2021-12-21T00:20:53+01:00 mail2 mail2 - - - ï»¿ SMTP: Attempt to login to disabled account alchimilla@mmguest.com. Attempt from IP address 179.127.143.14.
+                    '(?<[error][message]>%{DATA}account) %{NOTSPACE:[user][email]} %{DATA:[event][detail]} %{IP:[source][ip]}',
+                    # <19>1 2021-12-20T19:13:56+01:00 mail2 mail2 - - - ï»¿ registration.cpp: License error: Unable to set license (License is not for this operating system).
+                    '%{DATA:[error][type]}: %{DATA:[error][message]} \(%{DATA:[event][reason]}\)',
+                    # <19>1 2021-12-26T06:02:01+01:00 mail4 mail4 - - - ï»¿ FolderIndexTraitsImpl.cpp: Index error in folder ~ceo@labelgroup.com/Tasks/Pier: The database disk image is malformed
+                    '(?<[error][message]>%{DATA}in folder) %{NOTSPACE:[file][directory]}: %{GREEDYDATA:[event][reason]}',
+                    # <19>1 2021-12-27T09:58:33+01:00 mail.mmn.lan mail-kerio-connect - - - ï»¿ folder_manager.cpp: Don't to recursively create folder '#public/Voicemail-Italgas/Mail/Mail/Supporto Tecnico' with type 0.
+                    '(?<error_message_1>%{DATA} folder) \'%{DATA:[file][directory]}\' %{DATA:error_message_2}\.',
+                    # <19>1 2021-12-28T09:28:29+01:00 mail2 mail2 - - - ï»¿ mail_queue.cpp: TNEF decoding of message /hdstore/store/queue/2b/61cacaac-0004169e.eml failed: TNEF stream contains unsupported properties
+                    '%{DATA:error_message_1} of message (?<[file][path]>\/%{NOTSPACE:[file][directory]}\_%{NOTSPACE:[email][local_id]}\.%{WORD:[file][extension]}) (?<error_message_2>%{WORD:[event][action]}): %{GREEDYDATA:[event][reason]}',
+                    # <22>1 2021-12-28T09:20:01+01:00 mail4 mail4 - - - ï»¿ HTTP/WebAdmin: Build-in administrator authenticated from IP address 192.168.250.249; Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/15.2 Safari/605.1.15
+                    'Build-in %{NOTSPACE:[user][name]} %{WORD:[event][action]} from IP address %{IP:[source][ip]}; %{GREEDYDATA:[user_agent][original]}',
+                    # <20>1 2021-12-27T18:38:54+01:00 mail.mmn.lan mail-kerio-connect - - - ï»¿ ActiveSync: Inconsistent synchronization. The device has sent the invalid SyncKey [T=20211227T131751Z;U=0;F=2;M=55973;S=0;], DeviceId: U6CKJN1F490VT6C9RP2C7LG1IO, User: priscillacavaliere@magneticmedia.com, Collection: [guid: 7570348d-35a9-41dd-8da0-f24f0f97b159; id: 1; ~priscillacavaliere@magneticmedia.com/INBOX]. Forcing folder re-synchronization.
+                    '%{DATA:[error][type]}\. %{DATA:[error][message]} \[T=%{NOTSPACE};U=%{NUMBER};F=%{NUMBER};M=%{NOTSPACE};S=%{NUMBER};\], DeviceId: %{NOTSPACE:[user_agent][device][id]}, User: %{NOTSPACE:[user][email]}, Collection: \[guid: %{DATA:[[process][entity_id]]}; id: %{NUMBER}; %{NOTSPACE:[file][directory]}\]\. %{GREEDYDATA:[event][detail]}\.',
+                    # <20>1 2021-12-27T17:28:35+01:00 mail.mmn.lan mail-kerio-connect - - - ï»¿ SyncCommand::WriteContact: DeviceId: androidc1443839205, User: monicadipatre@magneticmedia.com: Unable to modify contact 'Bertocchi, Roberta' in folder '#public/Contacts'
+                    'DeviceId: %{NOTSPACE:[user_agent][device][id]}, User: %{NOTSPACE:[user][email]}: %{DATA:[event][detail]} in folder \'%{NOTSPACE:[file][directory]}\'',
+                    # <20>1 2021-12-29T22:22:51+01:00 mail4 mail4 - - - ï»¿ SpamAssassin learning /srv/kerio/tmp/NOTSPAM_53fe3d7e952c228a1d5c24b00b96c56c.eml has blocked external server.
+                    '(?<event_detail_1>(?<[service][name]>SpamAssassin) %{DATA:[event][action]}) (?<[file][path]>\/%{NOTSPACE:[file][directory]}\_%{NOTSPACE:[email][local_id]}\.%{WORD:[file][extension]}) %{GREEDYDATA:event_detail_2}\.',
+                    # <19>1 2021-12-22T08:45:50+01:00 mail4 mail4 - - - ï»¿ AntivirusModule.cpp: Antivirus update failed: Cannot find update location: OpenSSL SSL_connect: Connection reset by peer in connection to bdupdate.kerio.com:443 . Download failed.
+                    '(?<[error][message]>Antivirus %{DATA}): %{DATA:[event][reason]}: OpenSSL %{DATA:[process][name]}: %{DATA:[event][detail]} in connection to %{NOTSPACE:[server][address]}:%{NUMBER:[server][port]} \. %{DATA:[event][action]}\.',
+                    # <19>1 2022-01-03T15:27:18+01:00 mail.mmn.lan mail-kerio-connect - - - ï»¿ mail_imaps.cpp: Couldn't get MIME structure of message 000019f0 in folder #public/Amministrazione/PEC-MMN/Ricevute
+                    '%{DATA:[error][message]} %{NOTSPACE:[email][message_id]} in folder %{NOTSPACE:[file][directory]}'
+                ]
+            }
+            tag_on_failure => ['_failure', '_server_failure']
+        }
+    }
+
+    else if "Queue-ID:" in [event][message] {
+        grok {
+            match => {
+                '[event][message]' => [
+                    # <22>1 2021-12-23T11:56:49+01:00 mail.mmn.lan mail-kerio-connect - - - ï»¿ Recv: Queue-ID: 61c455f1-000950b3, Service: MailQueueService, From: <Acquario@magneticmedia.com>, To: <r.belotti@magneticmedia.com>, Size: 3496, Message added to mail queue., Subject: Rifiutata: Rolando x Corso Mac OS Essential/Apple
+                    'Queue-ID: %{NOTSPACE:[event][id]}, Service: %{DATA:[service][name]}, From: (\"%{DATA:[user][name]}\" )?<%{DATA:[source][user][email]}>, To: <%{DATA:[destination][user][email]}>, Size: %{NUMBER:[email][attachments][file][size]}, (?<[event][detail]>Message added to mail queue.), Subject: %{GREEDYDATA:[email][subject]}',
+                    # <22>1 2021-12-20T18:06:15+01:00 mail.mmn.lan mail-kerio-connect - - - ï»¿ Recv: Queue-ID: 61c0b807-0009258b, Service: SMTP, From: <g.cannata@magneticmedia.com>, To: <m.lonati@magneticmedia.com>, Size: 14813, Sender-Host: 93.66.86.131, User: g.cannata@magneticmedia.com, SSL: yes, Subject: Re: Consegne ritiro e pony, Msg-Id: <E9B50E03-ED86-4F03-B4E8-E08439147238@magneticmedia.com>
+                    'Queue-ID: %{NOTSPACE:[event][id]}, Service: %{DATA:[service][name]}, From: (\"%{DATA:[user][name]}\" )?<%{DATA:[source][user][email]}>, To: <%{DATA:[destination][user][email]}>, Size: %{NUMBER:[email][attachments][file][size]}, Sender-Host: %{IP:[source][ip]},( User: %{NOTSPACE},)? SSL: %{NOTSPACE}, Subject: %{DATA:[email][subject]}(\s+|), Msg-Id:(\s+|)<%{DATA:[email][message_id]}>',
+                    'Queue-ID: %{NOTSPACE:[event][id]}, Service: %{DATA:[service][name]}, From: (\"%{DATA:[user][name]}\" )?<%{DATA:[source][user][email]}>, To: <%{DATA:[destination][user][email]}>, Size: %{NUMBER:[email][attachments][file][size]}, Sender-Host: %{IP:[source][ip]},( User: %{NOTSPACE},)? SSL: %{NOTSPACE}, Subject: %{GREEDYDATA:[email][subject]}',
+                    'Queue-ID: %{NOTSPACE:[event][id]}, Service: %{DATA:[service][name]}, From: (\"%{DATA:[user][name]}\" )?<%{DATA:[source][user][email]}>, To: <%{DATA:[destination][user][email]}>, Size: %{NUMBER:[email][attachments][file][size]}, Sender-Host: %{IP:[source][ip]},( User: %{NOTSPACE},)? Subject: %{GREEDYDATA:[email][subject]}',
+                    'Queue-ID: %{NOTSPACE:[event][id]}, Service: %{DATA:[service][name]}, From: (\"%{DATA:[user][name]}\" )?<%{DATA:[source][user][email]}>, To: <%{DATA:[destination][user][email]}>, Size: %{NUMBER:[email][attachments][file][size]}, Sender-Host: %{IP:[source][ip]},( User: %{NOTSPACE},)? Subject: %{DATA:[email][subject]}(\s+|), Msg-Id:(\s+|)<%{DATA:[email][message_id]}>',
+                    'Queue-ID: %{NOTSPACE:[event][id]}, Service: %{DATA:[service][name]}, From: (\"%{DATA:[user][name]}\" )?<%{DATA:[source][user][email]}>, To: <%{DATA:[destination][user][email]}>, Size: %{NUMBER:[email][attachments][file][size]}, Sender-Host: %{IP:[source][ip]},( User: %{NOTSPACE},)? SSL: %{NOTSPACE}, Msg-Id:(\s+|)%{NOTSPACE:[email][message_id]}',
+                    'Queue-ID: %{NOTSPACE:[event][id]}, Service: %{DATA:[service][name]}, From: (\"%{DATA:[user][name]}\" )?<%{DATA:[source][user][email]}>, To: <%{DATA:[destination][user][email]}>, Size: %{NUMBER:[email][attachments][file][size]}, Sender-Host: %{IP:[source][ip]},( User: %{NOTSPACE},)? Msg-Id:(\s+|)<%{DATA:[email][message_id]}>',
+
+                    # <22>1 2021-12-20T19:49:57+01:00 mail2 mail2 - - - ï»¿ Recv: Queue-ID: 61c0d055-0004036c, Service: ActiveSync, From: <emanuela.sironi@studiolegalesironi.it>, To: <marta.invernizzi@notaiospreafico.it>, Size: 22489, Sender: Outlook/16.0 (16.0.14701.20040; x64), Subject: RE: bozza atto di vendita, Msg-Id: <!&!AAAAAAAAAAAYAAAAAAAAAL7nZeAzykZDmBNi+wquATLCgAAAEAAAADy97f2DpVhNqtKoE2Z8+/8BAAAAAA==@studiolegalesironi.it>
+                    'Queue-ID: %{NOTSPACE:[event][id]}, Service: %{DATA:[service][name]}, From: (\"%{DATA:[user][name]}\" )?<%{DATA:[source][user][email]}>, To: <%{DATA:[destination][user][email]}>, Size: %{NUMBER:[email][attachments][file][size]}, Sender: %{DATA:[user_agent][original]},( User: %{NOTSPACE},)? Subject: %{DATA:[email][subject]}(\s+|), Msg-Id:(\s+|)<%{DATA:[email][message_id]}>',
+                    'Queue-ID: %{NOTSPACE:[event][id]}, Service: %{DATA:[service][name]}, From: (\"%{DATA:[user][name]}\" )?<%{DATA:[source][user][email]}>, To: <%{DATA:[destination][user][email]}>, Size: %{NUMBER:[email][attachments][file][size]}, Sender: %{DATA:[user_agent][original]},( User: %{NOTSPACE},)? Msg-Id:(\s+|)<%{DATA:[email][message_id]}>',
+                    # <22>1 2021-12-20T18:26:17+01:00 mail2 mail2 - - - ï»¿ Recv: Queue-ID: 61c0bcb9-0004031d, Service: DSN, From: <>, To: <paola@ilnasodelvino.com>, Size: 2032, Report: success, Subject: Message delivered: Fattura Nr. 001135/21 del 17/12/2021, Msg-Id: <3638638017-32712@mail2.magneticmedia.com>
+                    'Queue-ID: %{NOTSPACE:[event][id]}, Service: %{DATA:[service][name]}, From: (\"%{DATA:[user][name]}\" )?<%{DATA:[source][user][email]}>, To: <%{DATA:[destination][user][email]}>, Size: %{NUMBER:[email][attachments][file][size]}, Report: %{DATA:[event][action]}(, User:%{DATA})?, Subject: %{DATA:[email][subject]}(\s+|), Msg-Id:(\s+|)<%{DATA:[email][message_id]}>',
+                    'Queue-ID: %{NOTSPACE:[event][id]}, Service: %{DATA:[service][name]}, From: (\"%{DATA:[user][name]}\" )?<%{DATA:[source][user][email]}>, To: <%{DATA:[destination][user][email]}>, Size: %{NUMBER:[email][attachments][file][size]}, Report: %{DATA:[event][action]}(, User:%{DATA})?, Msg-Id:(\s+|)<%{DATA:[email][message_id]}>',
+                    # <22>1 2021-12-20T18:06:17+01:00 mail.mmn.lan mail-kerio-connect - - - ï»¿ Sent: Queue-ID: 61c0b807-0009258b, Recipient: <m.maffioletti@magneticmedia.com>, Result: delivered, Status: 2.0.0 , Remote-Host: 127.0.0.1, Msg-Id: <E9B50E03-ED86-4F03-B4E8-E08439147238@magneticmedia.com>
+                    'Queue-ID: %{NOTSPACE:[event][id]}, Recipient: <%{DATA:[destination][user][email]}>, Result: %{DATA:[event][action]}, Status: %{DATA}(\s+|), Remote-Host: (%{IP:[host][ip]}|%{NOTSPACE:[host][domain]}), Msg-Id: <%{DATA:[email][message_id]}>',
+                    'Queue-ID: %{NOTSPACE:[event][id]}, Recipient: <%{DATA:[destination][user][email]}>, Result: %{DATA:[event][action]}, Status: %{DATA}(\s+|), Remote-Host: (%{IP:[host][ip]}|%{NOTSPACE:[host][domain]})',
+                    # <22>1 2021-12-20T21:52:00+01:00 mail4 mail4 - - - ï»¿ Sent: Queue-ID: 61c0ecee-000e4a09, Recipient: <sottilotta.giulia@iccavalieri.edu.it>, Result: delayed, Status: 4.1.8 452 4.1.0 ... sender rejected (too busy for now), Remote-Host: mx.iccavalieri.edu.it, Msg-Id: <B2789558-0642-42DB-8BA9-053E6F56BCC3@sala.it>
+                    'Queue-ID: %{NOTSPACE:[event][id]}, Recipient: <%{DATA:[destination][user][email]}>, Result: %{DATA:[event][action]}, Status: %{DATA} \.\.\. %{DATA:[error][message]}, Remote-Host: (%{IP:[host][ip]}|%{NOTSPACE:[host][domain]}), Msg-Id: <%{DATA:[email][message_id]}>',
+                    # <22>1 2021-12-23T20:37:02+01:00 mail4 mail4 - - - ï»¿ Recv: Queue-ID: 61c4cfdd-000e6b54, Service: ActiveSync, From: <d.giacinti@labelgroup.com>, To: <luisa.spreafico@alice.it>, Size: 5131, Sender: Android-SAMSUNG-SM-A505FN/101.11, Subject: RE: auguri
+                    'Queue-ID: %{NOTSPACE:[event][id]}, Service: %{DATA:[service][name]}, From: (\"%{DATA:[user][name]}\" )?<%{DATA:[source][user][email]}>, To: <%{DATA:[destination][user][email]}>, Size: %{NUMBER:[email][attachments][file][size]}, Sender: %{DATA:[user_agent][original]}, Subject: %{GREEDYDATA:[email][subject]}',
+                    # <22>1 2021-12-27T15:11:22+01:00 mail4 mail4 - - - ï»¿ Recv: Queue-ID: 61c9c98a-000e7b3a, Service: SMTP, From: <r.fusi@lemi.net>, To: <info@pomamario.it>, Size: 34031, Sender-Host: 185.186.95.105, SSL: yes
+                    'Queue-ID: %{NOTSPACE:[event][id]}, Service: %{DATA:[service][name]}, From: (\"%{DATA:[user][name]}\" )?<%{DATA:[source][user][email]}>, To: <%{DATA:[destination][user][email]}>, Size: %{NUMBER:[email][attachments][file][size]}, Sender-Host: %{IP:[source][ip]},( User: %{NOTSPACE},)? SSL: %{NOTSPACE}',
+                    # <22>1 2021-12-22T19:45:11+01:00 mail4 mail4 - - - ï»¿ Recv: Queue-ID: 61c37237-000e5fd2, Service: Queue, From: <>, To: <redazione@dairypress.com>, Size: 838, Quota warning, Threshold: 90%, User: redazione@dairypress.com, Subject: WARNING: 90% of your mailbox is used, Msg-Id: <3816171339-9389@mail4.magneticmedia.com>
+                    'Queue-ID: %{NOTSPACE:[event][id]}, Service: %{DATA:[service][name]}, From: (\"%{DATA:[user][name]}\" )?<%{DATA:[source][user][email]}>, To: <%{DATA:[destination][user][email]}>, Size: %{NUMBER:[email][attachments][file][size]}, (?<[event][detail]>Quota warning%{DATA}), User: %{NOTSPACE:[user][email]}, Subject: %{DATA:[email][subject]}, Msg-Id: <%{DATA:[email][message_id]}>',
+                    # <22>1 2021-12-29T19:09:49+01:00 mail4 mail4 - - - ï»¿ Recv: Queue-ID: 61cca46d-000e8ac5, Service: ActiveSync, From: <d.giacinti@labelgroup.com>, To: <info@albanesefranz.it>, Size: 197745, Sender: Android-SAMSUNG-SM-A505FN/101.11
+                    'Queue-ID: %{NOTSPACE:[event][id]}, Service: %{DATA:[service][name]}, From: (\"%{DATA:[user][name]}\" )?<%{DATA:[source][user][email]}>, To: <%{DATA:[destination][user][email]}>, Size: %{NUMBER:[email][attachments][file][size]}, Sender: %{NOTSPACE:[user_agent][original]}'
+                ]
+            }
+            tag_on_failure => ['_failure', '_queue_failure']
+        }
+    }
+
+    else if ![server][name]{
+        grok {
+            match => {
+                '[event][message]' => [
+                    # <189>1 2021-12-21T09:10:50+01:00 mail.mmn.lan mail-kerio-connect - - - ï»¿ Account lockout - user marketing@magneticmedia.com will be blocked for connections from IP address 109.237.103.13 for 5 minutes: too many failed logins from this IP address
+                    '%{DATA:[event][action]} - (?<event_detail_1>user) %{NOTSPACE:[user][email]} (?<event_detail_2>%{DATA}) from IP address %{IP:[source][ip]} %{DATA}: %{GREEDYDATA:[event][reason]}',
+                    # <20>1 2021-12-22T18:27:18+01:00 mail4 mail4 - - - ï»¿ Locale support for language it (it_IT.UTF8) is not installed on the system: locale::facet::_S_create_c_locale name not valid
+                    '(?<event_detail_1>%{DATA} support) for language %{WORD} \(%{DATA}\) (?<event_detail_2>%{DATA}): locale::facet::%{GREEDYDATA:[event][reason]}',
+                    # <189>1 2021-12-23T00:29:06+01:00 mail.mmn.lan mail-kerio-connect - - - ï»¿ IMAP connection from IP address 95.234.144.112 rejected: too many simultaneous connections (101 connections, limit 100)
+                    '(?<error_message_1>%{DATA}) from IP address %{IP:[source][ip]} (?<error_message_2>%{DATA:[event][action]}): %{DATA:[event][reason]} \(%{DATA}\)',
+                    '(?<[error][message]>%{WORD:[event][action]} %{DATA}) from %{IP:[source][ip]} with %{DATA:[event][detail]}\.',
+                    # <189>1 2021-12-20T18:06:07+01:00 mail.mmn.lan mail-kerio-connect - - - ï»¿ Failed IMAP login from 88.98.233.53, user m.bolognini@magneticmedia.com
+                    '(?<[error][message]>%{WORD:[event][action]} %{DATA}) from %{IP:[source][ip]}, user %{NOTSPACE:[user][email]}',
+                    '(?<[event][detail]>Last message repeated %{NUMBER} times)',
+                    # <22>1 2021-12-20T18:06:21+01:00 mail.mmn.lan mail-kerio-connect - - - ï»¿ {DELETE} Protocol: IMAP, User: m.baldi@magneticmedia.com, IP: 79.54.250.31, Folder: ~m.baldi@magneticmedia.com/Drafts, From: "Marco Baldi" <m.baldi@magneticmedia.com>, Subject: "Fwd: Test per storage", Msg-Id: <<7BAD79AA-7AE6-4F6A-8B85-5B4A4AE43CD8@magneticmedia.com>>, Delivered: 20/Dec/2021 18:05:51, Size: 12640
+                    '\{%{DATA:[event][action]}\} Protocol: %{WORD:[network][protocol]}(\/%{NOTSPACE:[server][module]})?, User: %{NOTSPACE:[user][email]}, IP: %{IP:[source][ip]}, Folder: %{DATA:[file][directory]}, Destination Folder: %{DATA:[destination][file][directory]}, From: \"%{DATA:[source][user][email]}\" <%{DATA}>, Subject: %{DATA:[email][subject]}, Msg-Id: <%{DATA:[email][message_id]}>, Delivered: %{DATA:delivered_time}, Size: %{NUMBER:[email][attachments][file][size]}',
+                    '\{%{DATA:[event][action]}\} Protocol: %{WORD:[network][protocol]}(\/%{NOTSPACE:[server][module]})?, User: %{NOTSPACE:[user][email]}, IP: %{IP:[source][ip]}, Folder: %{DATA:[file][directory]}, From: (\"%{DATA:[source][user][name]}\" )?%{DATA:[source][user][email]}, Subject: %{DATA:[email][subject]}, Msg-Id: <%{DATA:[email][message_id]}>, Delivered: %{DATA:delivered_time}, Size: %{NUMBER:[email][attachments][file][size]}',
+                    '\{%{DATA:[event][action]}\} Protocol: %{WORD:[network][protocol]}(\/%{NOTSPACE:[server][module]})?, User: %{NOTSPACE:[user][email]}, IP: %{IP:[source][ip]}, Folder: %{DATA:[file][directory]}, Subject: %{DATA:[email][subject]}, Delivered: %{DATA:delivered_time}, Size: %{NUMBER:[email][attachments][file][size]}',
+                    # <22>1 2021-12-22T14:54:20+01:00 mail.mmn.lan mail-kerio-connect - - - ï»¿ {MOVE} Protocol: SYSTEM, User: , Folder: ~d.pertusi@magneticmedia.com/INBOX, Destination Folder: ~e.colonna@magneticmedia.com/Deleted Items, From: "Nencioni, Gerardo" <Gerardo.Nencioni@xerox.com>, Subject: "xsm", Msg-Id: <<DM5PR11MB186766F69A15AB5EABC1D4D18C7C9@DM5PR11MB1867.namprd11.prod.outlook.com>>, Delivered: 21/Dec/2021 15:07:00, Size: 25040
+                    '\{%{DATA:[event][action]}\} Protocol: %{WORD:[network][protocol]}(\/%{NOTSPACE:[server][module]})?, User: %{DATA:[user][email]}, Folder: %{DATA:[file][directory]}, Destination Folder: %{DATA:[destination][file][directory]}, From: (\"%{DATA:[source][user][name]}\" )?%{DATA:[source][user][email]}, Subject: %{DATA:[email][subject]}, Msg-Id: <%{DATA:[email][message_id]}>, Delivered: %{DATA:delivered_time}, Size: %{NUMBER:[email][attachments][file][size]}',
+                    '\{%{DATA:[event][action]}\} Protocol: %{WORD:[network][protocol]}(\/%{NOTSPACE:[server][module]})?, User: %{DATA:[user][email]}, Destination Folder: %{DATA:[destination][file][directory]}, From: \"%{DATA:[source][user][email]}\" <%{DATA}>, Subject: %{DATA:[email][subject]}, Msg-Id: <%{DATA:[email][message_id]}>, Delivered: %{DATA:delivered_time}, Size: %{NUMBER:[email][attachments][file][size]}',
+                    # <22>1 2021-12-20T18:54:23+01:00 mail.mmn.lan mail-kerio-connect - - - ï»¿ {MOVE} Protocol: HTTP/CalDav, User: manuelmusico@magneticmedia.com, IP: 79.17.159.127, Folder: ~manuelmusico@magneticmedia.com/Calendar, Destination Folder: ~manuelmusico@magneticmedia.com/Deleted Items, Subject: "MMN", Delivered: 20/Dec/2021 12:02:23, Size: 1240
+                    '\{%{DATA:[event][action]}\} Protocol: %{WORD:[network][protocol]}(\/%{NOTSPACE:[server][module]})?, User: %{NOTSPACE:[user][email]}, IP: %{IP:[source][ip]}, Folder: %{DATA:[file][directory]}, Destination Folder: %{DATA:[destination][file][directory]}, Subject: %{DATA:[email][subject]}, Delivered: %{DATA:delivered_time}, Size: %{NUMBER:[email][attachments][file][size]}',
+                    # <22>1 2021-12-23T11:42:20+01:00 mail.mmn.lan mail-kerio-connect - - - ï»¿ {DELETE_FOLDER} Protocol: IMAP, User: manuelmusico@magneticmedia.com, IP: 192.168.250.74, Folder: ~manuelmusico@magneticmedia.com/AttivitaÌ interne/Silvia 07_12, Items count: 0
+                    '\{%{DATA:[event][action]}\} Protocol: %{WORD:[network][protocol]}(\/%{NOTSPACE:[server][module]})?, User: %{NOTSPACE:[user][email]}, IP: %{IP:[source][ip]}, Folder: %{DATA:[file][directory]}, Items count: %{NUMBER:[file][count]}',
+                    # <22>1 2021-12-20T19:11:08+01:00 mail.mmn.lan mail-kerio-connect - - - ï»¿ {DELETE} Protocol: SYSTEM, User: $cleanout_agent, Folder: ~admin@magneticmedia.com/Deleted mailbox - libraesva@magneticmedia.com/INBOX, From: "root" <root@magneticmedia.com>, Subject: "Libra Esva Alert: Quarantine free space low, 86 % used on /var", Msg-Id: <<20191221120101.6AF104752B@lems1.magneticmedia.com>>, Delivered: 21/Dec/2019 13:01:04, Size: 931
+                    '\{%{DATA:[event][action]}\} Protocol: %{WORD:[network][protocol]}(\/%{NOTSPACE:[server][module]})?, User: %{NOTSPACE:[user][email]}, Folder: %{DATA:[file][directory]}, From: (\"%{DATA:[source][user][name]}\" )?%{DATA:[source][user][email]}, Subject: %{DATA:[email][subject]}, Msg-Id: <%{DATA:[email][message_id]}>, Delivered: %{DATA:delivered_time}, Size: %{NUMBER:[email][attachments][file][size]}',
+                    # <22>1 2021-12-24T11:54:37+01:00 mail.mmn.lan mail-kerio-connect - - - ï»¿ {DELETE_FOLDER} Folder: ~d.gaspani@magneticmedia.com/Archivio/2021/04-Apr deleted
+                    '\{%{DATA:[event][action]}\} (?<event_detail_1>Folder): %{NOTSPACE:[file][path]} %{WORD:event_detail_2}',
+                    # <21>1 2021-12-20T18:06:07+01:00 mail2 mail2 - - - ï»¿ Client with IP address 5.188.206.199 has no reverse DNS entry, connection rejected before SMTP greeting
+                    '(?<error_message_1>Client) with IP address %{IP:[source][ip]} %{DATA:error_message_2}, (?<[event][detail]>%{DATA:[event][action]} before %{GREEDYDATA})',
+                    # <189>1 2021-12-20T18:19:21+01:00 mail.mmn.lan mail-kerio-connect - - - ï»¿ Attempt to deliver to unknown recipient <nicolalecchi@mmn.it>, from <double-bounce@magneticmedia.com>, IP address 80.211.49.95
+                    '%{DATA:[event][detail]} <%{DATA:[destination][user][email]}>, from <%{DATA:[source][user][email]}>, IP address %{IP:[source][ip]}',
+                    # <21>1 2021-12-20T18:40:18+01:00 mail4 mail4 - - - ï»¿ IP address 116.54.77.52 found in DNS blacklist SpamCop, mail from <mgraziano@casellaeassociati.com> to <mgraziano@casellaeassociati.com> rejected
+                    '(?<event_detail_1>IP address) %{IP:[source][ip]} %{DATA:event_detail_2}, mail from <%{DATA:[source][user][email]}> to <%{DATA:[destination][user][email]}> %{NOTSPACE:[event][action]}',
+                    # <189>1 2021-12-20T18:36:10+01:00 mail.mmn.lan mail-kerio-connect - - - ï»¿ SMTP server connection from 80.82.77.33 closed after 3 bad commands
+                    '(?<event_detail_1>%{DATA}) from %{IP:[source][ip]} (?<event_detail_2>%{WORD:[event][action]} after %{NUMBER} %{GREEDYDATA})',
+                    # <20>1 2021-12-20T19:13:56+01:00 mail2 mail2 - - - ï»¿ License update failed: Automatic license update failed during attempt to download new license version: (11) License is not for this operating system
+                    '%{DATA:[error][message]}: %{DATA:[event][detail]}: \(%{NUMBER}\) %{GREEDYDATA:[event][reason]}',
+                    # <20>1 2021-12-20T19:39:43+01:00 mail4 mail4 - - - ï»¿ Failed STARTTLS in IMAP connection with 5.89.201.199
+                    '(?<error_message_1>%{DATA:[event][action]}) in %{NOTSPACE:[network][protocol]} %{WORD:error_message_2} with %{IP:[source][ip]}',
+                    # <189>1 2021-12-23T09:53:46+01:00 mail.mmn.lan mail-kerio-connect - - - ï»¿ Failed IMAP login from 192.168.250.61, authentication with method DIGEST-MD5 cancelled by user
+                    '(?<error_message_1>Failed) %{WORD} (?<error_message_2>login) from %{IP:[source][ip]}, (?<event_detail_1>authentication) with method %{NOTSPACE} %{GREEDYDATA:event_detail_2}',
+                    '(?<error_message_1>Failed) %{WORD} (?<error_message_2>login) from %{IP:[source][ip]}, %{DATA:[event][detail]} with method %{NOTSPACE}',
+                    # <189>1 2021-12-20T23:16:56+01:00 mail.mmn.lan mail-kerio-connect - - - ï»¿ Relay attempt from IP address 102.39.111.112, mail from <spameri@tiscali.it> to <spameri@tiscali.it> rejected
+                    'Relay attempt from IP address %{IP:[source][ip]}, (?<event_detail_1>mail) from <%{DATA:[source][user][email]}> to <%{DATA:[destination][user][email]}> (?<event_detail_2>%{NOTSPACE:[event][action]})',
+                    # <21>1 2021-12-20T19:46:57+01:00 mail4 mail4 - - - ï»¿ Message from IP address 80.211.49.95, sender <v-ppldmh_lpbgphelpa_haohjado_haohjado_a@bounce.banca.carige.it> rejected: sender domain does not exist
+                    '(?<error_message_1>Message) %{DATA} %{IP:[source][ip]}, sender <%{DATA:[source][user][email]}> %{WORD:error_message_2}: %{GREEDYDATA:[event][reason]}',
+                    # <20>1 2021-12-21T17:49:44+01:00 mail4 mail4 - - - ï»¿ Message from <elena.pepi@agentinestle.it> is too big: maximum 5242880 bytes (see user/domain limit)
+                    '(?<error_message_1>Message) from <%{DATA:[source][user][email]}> %{DATA:error_message_2}: %{GREEDYDATA:[event][detail]}',
+                    # <21>1 2021-12-23T09:22:08+01:00 mail4 mail4 - - - ï»¿ Client for Web session(id=a7067eb97e9bb7ec769efb831194957bb4630fce2afb20a54a4f97f84373279c; user=s.cattaneo@labelgroup.com)changed IP address: created for IP=87.4.45.202, secure=yes, new connection from IP=62.18.123.220, secure=yes
+                    '(?<event_detail_1>Client for Web session)\(id=%{NOTSPACE:[event][id]}; user=%{DATA:[user][email]}\)%{DATA:event_detail_2}: created for IP=%{IP:[destination][ip]}, secure=%{WORD:[event][secure]}, new connection from IP=%{IP:[source][ip]}, secure=%{WORD}',
+                    # <21>1 2021-12-23T16:10:04+01:00 mail4 mail4 - - - ï»¿ SMTP Proxy spam attack detected from 167.71.68.255
+                    '%{NOTSPACE:[network][protocol]} %{DATA:[error][message]} from %{IP:[source][ip]}',
+                    # <21>1 2021-12-20T18:27:37+01:00 mail2 mail2 - - - ï»¿ Kerio Antivirus database has been successfully updated. Kerio Antivirus engine version/Signature count: (AVCORE v2.2 Linux/x86_64 11.0.1.19 (March 15, 2021)/10884757) is now active.
+                    '(?<[event][reason]>Kerio Antivirus%{DATA})\. %{DATA:event_detail_1}: \(%{GREEDYDATA:[observer][version]}\/%{NUMBER}\) %{DATA:event_detail_2}\.',
+                    # <20>1 2021-12-22T21:21:24+01:00 mail2 mail2 - - - ï»¿ New version is available for download: Kerio Connect 9.3.1 Patch 2
+                    '%{DATA:[event][detail]}: (?<[observer][name]>Kerio Connect) %{DATA:[observer][version]} Patch %{NUMBER}',
+                    # <20>1 2021-12-28T09:57:35+01:00 mail.mmn.lan mail-kerio-connect - - - ï»¿ Message index in folder ~p.biffi@magneticmedia.com/Sent Items is corrupted. Recovering index with redo log from indexlog.fld.
+                    '(?<error_message_1>Message index) in folder %{DATA:[file][directory]} (?<error_message_2>is %{WORD:[event][action]})\. %{GREEDYDATA:[event][detail]}',
+                    # <20>1 2021-12-28T09:57:41+01:00 mail.mmn.lan mail-kerio-connect - - - ï»¿ Message index in folder ~m.vavassori@magneticmedia.com/Calendar successfully recovered (5 items changed).
+                    '(?<event_detail_1>Message index) in folder %{DATA:[file][directory]} (?<event_detail_2>%{DATA} %{WORD:[event][action]}) \(%{DATA}\)',
+                    # <20>1 2021-12-24T09:48:18+01:00 mail.mmn.lan mail-kerio-connect - - - ï»¿ Address <no-reply@magneticmedia.com> expanded to zero recipients
+                    '(?<event_detail_1>Address) \<%{DATA:[user][email]}\> (?<event_detail_2>%{DATA} recipients)',
+                    # <21>1 2021-12-30T16:48:00+01:00 mail4 mail4 - - - ï»¿ Message from IP address 45.156.24.230, sender <no-reply@confrontcheng.top> temporarily rejected: sender domain does not resolve
+                    '(?<error_message_1>Message) from IP address %{IP:[source][ip]}, sender \<%{DATA:[source][user][email]}\> %{DATA:error_message_2}: %{GREEDYDATA:[event][detail]}',
+                    # <189>1 2021-12-22T02:15:40+01:00 mail.mmn.lan mail-kerio-connect - - - ï»¿ SPF check failed: The IP address '115.231.154.129' is not in permitted set for sender 'lanxifa14@163.com' (FAIL)
+                    '%{WORD:[event][provider]} (?<[event][action]>check failed): (?<error_message_1>The IP address) \'%{IP:[source][ip]}\' (?<error_message_2>%{DATA}sender) \'%{DATA:[source][user][email]}\' \(%{DATA}\)',
+                    # <20>1 2021-12-28T23:19:35+01:00 mail.mmn.lan mail-kerio-connect - - - ï»¿ DNS failure while trying to find address 163.58.205.123.bl.spamcop.net in blacklist SpamCop
+                    '(?<error_message_1>%{DATA}address) %{NOTSPACE:[client][address]} (?<error_message_2>in blacklist %{GREEDYDATA})',
+                    # <20>1 2021-12-27T20:04:43+01:00 mail.mmn.lan mail-kerio-connect - - - ï»¿ No local mailbox no-reply@magneticmedia.com, expanded from no-reply@mmn.it
+                    '(?<[error][message]>No local mailbox) %{NOTSPACE:[destination][user][email]}, expanded from %{NOTSPACE:[source][user][email]}',
+                    # <20>1 2021-12-28T09:16:26+01:00 mail4 mail4 - - - ï»¿ Loop detected in message 61cac7d9-000e7f73 from <info@rattisilviopackaging.it> for user <poma@pomamario.it>.
+                    '(?<[error][message]>Loop detected) in message %{NOTSPACE:[email][message_id]} from \<%{DATA:[source][user][email]}\> for user \<%{DATA:[destination][user][email]}\>',
+                    # <20>1 2021-12-29T22:22:51+01:00 mail4 mail4 - - - ï»¿ SpamAssassin learning /srv/kerio/tmp/NOTSPAM_53fe3d7e952c228a1d5c24b00b96c56c.eml has blocked external server.
+                    '(?<event_detail_1>(?<[service][name]>SpamAssassin) %{DATA:[event][action]}) (?<[file][path]>\/%{NOTSPACE:[file][directory]}\_%{NOTSPACE:[email][local_id]}\.%{WORD:[file][extension]}) %{GREEDYDATA:event_detail_2}\.',
+                    # <22>1 2021-12-26T16:54:04+01:00 mail2 mail2 - - - ï»¿ {MOVE_FOLDER} Protocol: IMAP, User: luigivava@mmguest.com, IP: 95.249.6.77, Old location: ~luigivava@mmguest.com/Junk E-mail/FaceBook, New location: ~luigivava@mmguest.com/FaceBook, Items count: 376
+                    '\{%{DATA:[event][action]}\} Protocol: %{WORD:[network][protocol]}(\/%{NOTSPACE:[server][module]})?, User: %{NOTSPACE:[user][email]}, IP: %{IP:[source][ip]}, Old location: %{DATA:[source][file][directory]}, New location: %{DATA:[destination][file][directory]}, Items count: %{NUMBER:[file][count]}',
+                    # <21>1 2021-12-28T09:19:23+01:00 mail2 mail2 - - - ï»¿ Built-in administrator admin attempted to login to service with incorrect password. Attempt from IP address 192.168.250.249.
+                    '(?<[event][detail]>%{DATA} %{NOTSPACE:[user][name]} attempted %{DATA}) with %{DATA:[error][message]}\. Attempt from IP address %{IP:[source][ip]}',
+                    # <22>1 2021-12-29T13:24:02+01:00 mail.mmn.lan mail-kerio-connect - - - ï»¿ {DELETE} Protocol: SYSTEM, User: r.belotti, Folder: ~hangar@magneticmedia.com/Calendar, Subject: "Rosa Belotti", Delivered: 08/Nov/2021 09:31:30, Size: 1542
+                    '\{%{DATA:[event][action]}\} Protocol: %{WORD:[network][protocol]}(\/%{NOTSPACE:[server][module]})?, User: %{NOTSPACE:[user][email]}, Folder: %{DATA:[file][directory]}, Subject: %{DATA:[email][subject]}, Delivered: %{DATA:delivered_time}, Size: %{NUMBER:[email][attachments][file][size]}',
+                    # <22>1 2022-01-03T12:51:03+01:00 mail.mmn.lan mail-kerio-connect - - - ï»¿ MyKerio administrator: d.gaspani@magneticmedia.com - Set rights for folder store://magneticmedia.com/.public (user=d.gaspani@magneticmedia.com, rights='Administrator')
+                    '(?<[event][privider]>MyKerio administrator): %{NOTSPACE} - %{DATA:[event][detail]}:%{NOTSPACE:[file][directory]} \(user=%{NOTSPACE:[user][email]}, rights=\'%{DATA:[user][roles]}\'\)'
+                ]
+            }
+            tag_on_failure => ['_failure', '_else_failure']
+        }
+    }
+
+    # 20/Dec/2021 18:05:51
+    date {
+        match => ['delivered_time', 'dd/MMM/yyyy HH:mm:ss']
+        target => '[email][delivery_timestamp]'
+        remove_field => ['delivered_time']
+    }
+
+    if [error_message_1] and [error_message_2]{
+        mutate {
+            add_field => {
+                '[error][message]' => '%{error_message_1} %{error_message_2}'
+            }
+            remove_field => ['error_message_1','error_message_2']
+        }
+    }
+
+    if [event_detail_1] and [event_detail_2]{
+        mutate {
+            add_field => {
+                '[event][detail]' => '%{event_detail_1} %{event_detail_2}'
+            }
+            remove_field => ['event_detail_1','event_detail_2']
+        }
+    }
+
+    if [source][user][email] or [destination][user][email] or [user][email]{
+        mutate {
+            gsub => [
+                "[source][user][email]", "<", "",
+                "[source][user][email]", ">", "",
+                "[destination][user][email]", "<", "",
+                "[destination][user][email]", ">", "",
+                "[user][email]", "<", "",
+                "[user][email]", ">", ""
+            ]
+        }
+    }
+
+    mutate {
+        copy => {"@timestamp" => "[event][created]"}
+        remove_field => ["@timestamp"]
+    }
+
+    # 2021-12-20T18:03:52+01:00
+    date {
+        match => ['time', 'ISO8601']
+        target => "[@timestamp]"
+        remove_field => ["time"]
+    }
+
+    if '_failure' not in [tags] {
+        mutate { 
+            remove_field => ['[event][message]']
+        }
+    }
+
+    if [email][subject] == '""'{
+        mutate {
+            remove_field => ['[email][subject]']
+        }
+    }
+
+    mutate { 
+        rename=>{"message" => "[event][original]"}
+        lowercase => [ "[network][protocol]", "[event][action]" ]
+    }
+
+    if [event][action] == 'authenticated' {
+        mutate {
+            add_field => {"[event][outcome]" => "success"}
+            add_field => {"[event][login][outcome]" => "success"}
+            add_field => {"[event][category]" => "authentication"}
+        }
+    }
+
+    if [event][action] in ['denied', 'failed', 'connection rejected', 'blocked'] or [error][message] in ["User doesn't exist", "Invalid password for user", "Cannot connect to server", "Attempt to login to disabled account", "The device has sent the invalid SyncKey", "IMAP connection rejected", "Client has no reverse DNS entry", "Failed IMAP login from", "incorrect password"]{
+        mutate {
+            add_field => {"[event][outcome]" => "failure"}
+            add_field => {"[event][login][outcome]" => "failure"}
+            add_field => {"[event][category]" => "authentication"}
+        }
+    }
+}
